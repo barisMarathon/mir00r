@@ -4,6 +4,24 @@
     <meta charset="utf-8" />
     <title>Mir00r</title>
     <style>
+      :root {
+        --card-bg: #ffffff;
+        --card-border: rgba(0, 0, 0, 0.08);
+        --title-color: #1a1a1a;
+        --message-color: #444444;
+        --muted-color: #767676;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --card-bg: #2c2c2c;
+          --card-border: rgba(255, 255, 255, 0.08);
+          --title-color: #f2f2f2;
+          --message-color: #cfcfcf;
+          --muted-color: #a0a0a0;
+        }
+      }
+
       html,
       body {
         margin: 0;
@@ -12,11 +30,27 @@
         height: 100%;
         background: #000;
         overflow: hidden;
+        position: relative;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
       }
 
+      #frame,
+      #toast {
+        position: absolute;
+        inset: 0;
+      }
+
+      #frame.hidden,
+      #toast.hidden {
+        display: none;
+      }
+
+      /* --- kamera modu --- */
       #frame {
-        width: 100%;
-        height: 100%;
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
@@ -47,12 +81,102 @@
       #status.hidden {
         display: none;
       }
+
+      /* --- sahte bildirim modu --- */
+      #toast {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 10px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+        padding: 12px 14px;
+        overflow: hidden;
+      }
+
+      #toast-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        flex-shrink: 0;
+      }
+
+      #toast-icon {
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        background: linear-gradient(135deg, #4f8cff, #2f5ed4);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      #toast-app-name {
+        flex: 1;
+        font-size: 11px;
+        color: var(--muted-color);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #toast-time {
+        font-size: 11px;
+        color: var(--muted-color);
+        flex-shrink: 0;
+      }
+
+      #toast-close {
+        font-size: 13px;
+        color: var(--muted-color);
+        flex-shrink: 0;
+        line-height: 1;
+      }
+
+      #toast-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--title-color);
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      #toast-message {
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--message-color);
+        overflow: hidden;
+        white-space: pre-wrap;
+        word-break: break-word;
+        flex: 1;
+      }
     </style>
   </head>
   <body>
     <div id="frame">
       <video id="cam" autoplay muted playsinline></video>
       <div id="status" class="hidden"></div>
+    </div>
+    <div id="toast" class="hidden">
+      <div id="toast-header">
+        <div id="toast-icon">M</div>
+        <div id="toast-app-name">Mir00r</div>
+        <div id="toast-time">simdi</div>
+        <div id="toast-close">&times;</div>
+      </div>
+      <div id="toast-title"></div>
+      <div id="toast-message"></div>
     </div>
     <script src="main.js"></script>
   </body>

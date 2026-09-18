@@ -1,5 +1,9 @@
 const video = document.getElementById("cam");
 const status = document.getElementById("status");
+const frame = document.getElementById("frame");
+const toast = document.getElementById("toast");
+const toastTitle = document.getElementById("toast-title");
+const toastMessage = document.getElementById("toast-message");
 
 function showStatus(message) {
   status.textContent = message;
@@ -18,11 +22,42 @@ function logToBackend(message) {
   }
 }
 
+let mockContentLoaded = false;
+async function ensureMockContent() {
+  if (mockContentLoaded) return;
+  try {
+    const config = await window.__TAURI__.core.invoke("get_mock_notification");
+    toastTitle.textContent = config.title;
+    toastMessage.textContent = config.message;
+    mockContentLoaded = true;
+  } catch (err) {
+    toastTitle.textContent = "Bildirim";
+    toastMessage.textContent = "Icerik yuklenemedi.";
+    logToBackend("mock bildirim icerik hatasi: " + err);
+  }
+}
+
+function setMode(mode) {
+  if (mode === "mock") {
+    ensureMockContent();
+    frame.classList.add("hidden");
+    toast.classList.remove("hidden");
+  } else {
+    toast.classList.add("hidden");
+    frame.classList.remove("hidden");
+  }
+}
+
+// Backend hangi kisayolun basildigini "mir00r://mode" olayiyla bildiriyor
+// (payload: "camera" | "mock"); ayni pencere/webview icinde sadece
+// gorunen paneli degistiriyoruz, boylece ikinci bir WebView2 penceresi
+// olusturma ihtiyaci ortadan kalkiyor.
+window.__TAURI__?.event?.listen("mir00r://mode", (event) => {
+  setMode(event.payload);
+});
+
 function sampleBrightness() {
   if (!video.videoWidth) {
-    logToBackend(
-      `brightness ornek: video boyutu yok (readyState=${video.readyState}, paused=${video.paused})`,
-    );
     return;
   }
   const canvas = document.createElement("canvas");
@@ -36,15 +71,7 @@ function sampleBrightness() {
     sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
   }
   const avg = sum / (data.length / 4);
-
-  const statusStyle = getComputedStyle(status);
-  const topEl = document.elementFromPoint(
-    Math.floor(window.innerWidth / 2),
-    Math.floor(window.innerHeight / 2),
-  );
-  logToBackend(
-    `brightness ornek: ${avg.toFixed(1)} / 255 | status(display=${statusStyle.display}, opacity=${statusStyle.opacity}, hiddenClass=${status.classList.contains("hidden")}, text="${status.textContent}") | ustteEleman=${topEl ? topEl.id || topEl.tagName : "yok"} | body.classList=${document.body.className} | bodyBg=${getComputedStyle(document.body).backgroundColor}`,
-  );
+  logToBackend(`brightness ornek: ${avg.toFixed(1)} / 255`);
 }
 
 // Kamera akisi pencere gizliyken de baslatilir ve surekli acik tutulur;
@@ -58,14 +85,6 @@ async function startCamera() {
       audio: false,
     });
     video.srcObject = stream;
-    video.addEventListener("loadedmetadata", () => {
-      logToBackend(
-        `loadedmetadata: ${video.videoWidth}x${video.videoHeight}`,
-      );
-    });
-    video.addEventListener("playing", () => {
-      logToBackend("video playing event tetiklendi");
-    });
     try {
       await video.play();
     } catch (playErr) {
@@ -73,13 +92,8 @@ async function startCamera() {
     }
     hideStatus();
     const track = stream.getVideoTracks()[0];
-    logToBackend(
-      "kamera basladi: " +
-        (track ? track.label : "bilinmeyen cihaz") +
-        " ayarlar=" +
-        JSON.stringify(track ? track.getSettings() : {}),
-    );
-    setInterval(sampleBrightness, 2000);
+    logToBackend("kamera basladi: " + (track ? track.label : "bilinmeyen cihaz"));
+    setInterval(sampleBrightness, 5000);
   } catch (err) {
     showStatus("Kamera acilamadi: " + err.message);
     logToBackend("kamera HATASI: " + err.name + " - " + err.message);
