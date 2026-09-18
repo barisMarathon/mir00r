@@ -56,6 +56,79 @@ window.__TAURI__?.event?.listen("mir00r://mode", (event) => {
   setMode(event.payload);
 });
 
+let zoomLevel = 1;
+let panX = 0;
+let panY = 0;
+let zoomTarget = 2;
+let panStep = 8;
+
+window.__TAURI__?.core
+  ?.invoke("get_zoom_config")
+  .then((cfg) => {
+    zoomTarget = cfg.zoom_level;
+    panStep = cfg.pan_step;
+  })
+  .catch((err) => logToBackend("zoom config yuklenemedi: " + err));
+
+function applyVideoTransform() {
+  video.style.transform = `scaleX(-1) scale(${zoomLevel}) translate(${panX}%, ${panY}%)`;
+}
+
+function toggleZoom() {
+  if (zoomLevel === 1) {
+    zoomLevel = zoomTarget;
+  } else {
+    zoomLevel = 1;
+    panX = 0;
+    panY = 0;
+  }
+  applyVideoTransform();
+}
+
+function panBy(dx, dy) {
+  if (zoomLevel <= 1) return;
+  const limit = (1 - 1 / zoomLevel) * 50;
+  panX = Math.max(-limit, Math.min(limit, panX + dx));
+  panY = Math.max(-limit, Math.min(limit, panY + dy));
+  applyVideoTransform();
+}
+
+function resetZoom() {
+  zoomLevel = 1;
+  panX = 0;
+  panY = 0;
+  applyVideoTransform();
+}
+
+applyVideoTransform();
+
+// Kamera acikken Sag Shift ile zoom acilip kapaniyor, ok tuslariyla
+// zoomlu gorunum icinde gezinilebiliyor. Kamera kisayolu birakildiginda
+// backend "reset" gonderiyor, boylece bir sonraki acilista zoom/pan
+// varsayilana donuyor.
+window.__TAURI__?.event?.listen("mir00r://zoom-action", (event) => {
+  switch (event.payload) {
+    case "toggle":
+      toggleZoom();
+      break;
+    case "reset":
+      resetZoom();
+      break;
+    case "pan_up":
+      panBy(0, -panStep);
+      break;
+    case "pan_down":
+      panBy(0, panStep);
+      break;
+    case "pan_left":
+      panBy(panStep, 0);
+      break;
+    case "pan_right":
+      panBy(-panStep, 0);
+      break;
+  }
+});
+
 function sampleBrightness() {
   if (!video.videoWidth) {
     return;
