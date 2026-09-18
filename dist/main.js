@@ -86,7 +86,11 @@ function toggleZoom() {
 }
 
 function panBy(dx, dy) {
-  if (zoomLevel <= 1) return;
+  // Ok tuslarindan biri basilinca, zoom kapaliysa once zoom'u kendisi acar,
+  // sonra o yone dogru pan yapar.
+  if (zoomLevel === 1) {
+    zoomLevel = zoomTarget;
+  }
   const limit = (1 - 1 / zoomLevel) * 50;
   panX = Math.max(-limit, Math.min(limit, panX + dx));
   panY = Math.max(-limit, Math.min(limit, panY + dy));
