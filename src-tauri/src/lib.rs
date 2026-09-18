@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 const OVERLAY_LABEL: &str = "overlay";
+const SETTINGS_LABEL: &str = "settings";
 const MODE_EVENT: &str = "mir00r://mode";
 const ZOOM_EVENT: &str = "mir00r://zoom-action";
 const CONFIG_FILE_NAME: &str = "mir00r.config.json";
@@ -18,6 +19,14 @@ const DEFAULT_MOCK_HOTKEY: &str = "Ctrl+Shift+N";
 // surumunde Windows'ta desteklenmiyor (VK kod eslemesi yok), o yuzden
 // varsayilan olarak sade bir tus kullaniyoruz. Config'ten degistirilebilir.
 const DEFAULT_ZOOM_KEY: &str = "/";
+const DEFAULT_PIN_KEY: &str = "T";
+// WebView2'de ayni uygulama/user-data-folder icindeki TUM pencereler ayni
+// ortam (environment) secenklerini paylasmak zorunda. Overlay penceresi bu
+// bayraklarla olusturuldugu icin, sonradan olusturulan HER pencere (orn.
+// ayarlar) da AYNI bayraklari kullanmali; aksi halde HRESULT 0x8007139F
+// hatasiyla webview olusturma basarisiz oluyor.
+const WEBVIEW_BROWSER_ARGS: &str =
+    "--use-fake-ui-for-media-stream --disable-gpu-compositing --disable-accelerated-video-decode";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Region {
@@ -76,6 +85,10 @@ impl Default for ZoomConfig {
     }
 }
 
+fn default_pin_key() -> String {
+    DEFAULT_PIN_KEY.to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Config {
     /// Accelerator string, e.g. "Ctrl+Shift+C". Modifiers must come before the key.
@@ -85,6 +98,11 @@ struct Config {
     mock_notification: MockNotificationConfig,
     #[serde(default)]
     zoom: ZoomConfig,
+    /// Kamera basiliyken bu tusa basmak, o anki zoom/pozisyonda kamerayi
+    /// sabitler; Home birakilsa bile acik kalir. Tekrar basmak sabitlemeyi
+    /// kaldirir. Modifiersiz tek tus.
+    #[serde(default = "default_pin_key")]
+    pin_key: String,
 }
 
 impl Default for Config {
@@ -94,6 +112,7 @@ impl Default for Config {
             region: Region::default(),
             mock_notification: MockNotificationConfig::default(),
             zoom: ZoomConfig::default(),
+            pin_key: default_pin_key(),
         }
     }
 }
@@ -146,13 +165,78 @@ fn get_zoom_config(state: tauri::State<ZoomConfig>) -> ZoomConfig {
     state.inner().clone()
 }
 
+#[tauri::command]
+fn get_config(app: AppHandle) -> Config {
+    load_or_create_config(&app)
+}
+
+#[tauri::command]
+fn save_config(app: AppHandle, config: Config) -> Result<(), String> {
+    // Kayittan once kisayollarin gecerli oldugunu dogruluyoruz; aksi halde
+    // bozuk bir config bir sonraki acilista uygulamanin cokmesine yol acar.
+    config
+        .hotkey
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Gecersiz kamera kisayolu: {e}"))?;
+    config
+        .mock_notification
+        .hotkey
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Gecersiz bildirim kisayolu: {e}"))?;
+    config
+        .zoom
+        .key
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Gecersiz zoom tusu: {e}"))?;
+    config
+        .pin_key
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Gecersiz pin tusu: {e}"))?;
+
+    let path = config_path(&app).map_err(|e| e.to_string())?;
+    let serialized = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(&path, serialized).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct MonitorInfo {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[tauri::command]
+fn get_monitors(window: tauri::WebviewWindow) -> Result<Vec<MonitorInfo>, String> {
+    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+    Ok(monitors
+        .iter()
+        .map(|m| MonitorInfo {
+            x: m.position().x,
+            y: m.position().y,
+            width: m.size().width,
+            height: m.size().height,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).spawn();
+    }
+    app.exit(0);
+}
+
 /// Sahte bildirim tusu HOLD degil TOGGLE: bir basista acilir ve kalir,
 /// tekrar basilinca kapanir (birakma olayi yok sayilir). Kamera basiliyken
-/// bildirime basilirsa bildirim onune gecer (kamera fiziksel olarak basili
-/// kalsa bile); bildirim kapatilirsa ve kamera hala basiliysa kameraya
-/// geri donulur, degilse pencere tamamen gizlenir.
+/// (ya da sabitliyken) bildirime basilirsa bildirim onune gecer; bildirim
+/// kapatilirsa ve kamera hala basili/sabitliyse kameraya geri donulur,
+/// degilse pencere tamamen gizlenir.
 fn mock_toggle_handler(
     camera_held: Arc<AtomicBool>,
+    pinned: Arc<AtomicBool>,
     mock_on: Arc<AtomicBool>,
 ) -> impl Fn(&AppHandle, &Shortcut, ShortcutEvent) + Send + Sync + 'static {
     move |app, _shortcut, event| {
@@ -167,7 +251,7 @@ fn mock_toggle_handler(
         if now_on {
             let _ = window.emit(MODE_EVENT, "mock");
             let _ = window.show();
-        } else if camera_held.load(Ordering::SeqCst) {
+        } else if camera_held.load(Ordering::SeqCst) || pinned.load(Ordering::SeqCst) {
             let _ = window.emit(MODE_EVENT, "camera");
             let _ = window.show();
         } else {
@@ -194,8 +278,10 @@ fn mock_toggle_handler(
 fn camera_hold_handler(
     zoom_shortcut: Shortcut,
     pan_shortcuts: [(&'static str, Shortcut); 4],
+    pin_shortcut: Shortcut,
     camera_held: Arc<AtomicBool>,
     mock_on: Arc<AtomicBool>,
+    pinned: Arc<AtomicBool>,
 ) -> impl Fn(&AppHandle, &Shortcut, ShortcutEvent) + Send + Sync + 'static {
     move |app, _shortcut, event| {
         let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
@@ -209,6 +295,7 @@ fn camera_hold_handler(
 
                 let app_outer = app.clone();
                 let camera_held_outer = camera_held.clone();
+                let pinned_outer = pinned.clone();
                 std::thread::spawn(move || {
                     let app_inner = app_outer.clone();
                     let result = app_outer.run_on_main_thread(move || {
@@ -225,6 +312,19 @@ fn camera_hold_handler(
                                 }
                             }) {
                                 log::error!("zoom kisayolu kaydedilemedi: {err}");
+                            }
+                        }
+                        // Sabitleme (pin) tusu da sadece kamera basiliyken
+                        // aktif: basinca "pinned" bayragini ters ceviriyor.
+                        if !gs.is_registered(pin_shortcut) {
+                            let pinned_for_pin = pinned_outer.clone();
+                            if let Err(err) = gs.on_shortcut(pin_shortcut, move |_app, _s, ev| {
+                                if matches!(ev.state(), ShortcutState::Pressed) {
+                                    let now = !pinned_for_pin.load(Ordering::SeqCst);
+                                    pinned_for_pin.store(now, Ordering::SeqCst);
+                                }
+                            }) {
+                                log::error!("pin kisayolu kaydedilemedi: {err}");
                             }
                         }
                         for (action, shortcut) in pan_shortcuts {
@@ -284,6 +384,7 @@ fn camera_hold_handler(
                     let result = app_outer.run_on_main_thread(move || {
                         let gs = app_inner.global_shortcut();
                         let _ = gs.unregister(zoom_shortcut);
+                        let _ = gs.unregister(pin_shortcut);
                         for (_, shortcut) in pan_shortcuts {
                             let _ = gs.unregister(shortcut);
                         }
@@ -292,6 +393,11 @@ fn camera_hold_handler(
                         log::error!("zoom/pan kisayollari kaldirilamadi: {err}");
                     }
                 });
+                // Sabitlenmisse (pin) pencereyi oldugu gibi (mevcut
+                // zoom/pozisyonda) birakiyoruz; gizleme/sifirlama yok.
+                if pinned.load(Ordering::SeqCst) {
+                    return;
+                }
                 let _ = window.emit(ZOOM_EVENT, "reset");
                 if mock_on.load(Ordering::SeqCst) {
                     let _ = window.emit(MODE_EVENT, "mock");
@@ -310,7 +416,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             log_frontend,
             get_mock_notification,
-            get_zoom_config
+            get_zoom_config,
+            get_config,
+            save_config,
+            get_monitors,
+            restart_app
         ])
         .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -339,9 +449,7 @@ pub fn run() {
                 // always-on-top pencerelerde donanim hizlandirmali video
                 // decode bazen siyah/karanlik goruntu verdigi icin yazilim
                 // decode'a zorluyoruz.
-                .additional_browser_args(
-                    "--use-fake-ui-for-media-stream --disable-gpu-compositing --disable-accelerated-video-decode",
-                )
+                .additional_browser_args(WEBVIEW_BROWSER_ARGS)
                 // WebView2 yerel dosyalari diskte onbelleklediginden, gelistirme
                 // sirasinda dist/ altindaki dosyalari degistirmek uygulamayi
                 // yeniden baslatsak bile eski surumu gostermeye devam edebiliyor.
@@ -368,24 +476,31 @@ pub fn run() {
                 ("pan_left", "Left".parse().expect("gecerli sabit kisayol")),
                 ("pan_right", "Right".parse().expect("gecerli sabit kisayol")),
             ];
+            let pin_shortcut: Shortcut = config.pin_key.parse().map_err(|err| {
+                format!("gecersiz pin_key '{}' config dosyasinda: {err}", config.pin_key)
+            })?;
             let camera_held = Arc::new(AtomicBool::new(false));
             let mock_on = Arc::new(AtomicBool::new(false));
+            let pinned = Arc::new(AtomicBool::new(false));
 
             app.global_shortcut().on_shortcut(
                 camera_shortcut,
                 camera_hold_handler(
                     zoom_shortcut,
                     pan_shortcuts,
+                    pin_shortcut,
                     camera_held.clone(),
                     mock_on.clone(),
+                    pinned.clone(),
                 ),
             )?;
             log::info!("kamera kisayolu kaydedildi: {}", config.hotkey);
             log::info!(
-                "zoom tusu: {} (buyutme: {}x, pan adimi: %{})",
+                "zoom tusu: {} (buyutme: {}x, pan adimi: %{}), pin tusu: {}",
                 config.zoom.key,
                 config.zoom.zoom_level,
-                config.zoom.pan_step
+                config.zoom.pan_step,
+                config.pin_key
             );
 
             let mock_shortcut: Shortcut = config.mock_notification.hotkey.parse().map_err(|err| {
@@ -396,15 +511,16 @@ pub fn run() {
             })?;
             app.global_shortcut().on_shortcut(
                 mock_shortcut,
-                mock_toggle_handler(camera_held, mock_on),
+                mock_toggle_handler(camera_held, pinned, mock_on),
             )?;
             log::info!(
                 "sahte bildirim kisayolu kaydedildi (toggle): {}",
                 config.mock_notification.hotkey
             );
 
+            let settings_item = MenuItem::with_id(app, "settings", "Ayarlar", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Cikis", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&quit_item])?;
+            let tray_menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&tray_menu)
@@ -412,6 +528,67 @@ pub fn run() {
                 .on_menu_event(|app, event| {
                     if event.id() == "quit" {
                         app.exit(0);
+                        return;
+                    }
+                    if event.id() == "settings" {
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            // Pencere zaten varsa sadece goster/odakla.
+                            if app.get_webview_window(SETTINGS_LABEL).is_some() {
+                                let app2 = app.clone();
+                                let _ = app.run_on_main_thread(move || {
+                                    if let Some(w) = app2.get_webview_window(SETTINGS_LABEL) {
+                                        let _ = w.show();
+                                        let _ = w.set_focus();
+                                    }
+                                });
+                                return;
+                            }
+
+                            // Kamera penceresi kisa sure once olusturulduysa
+                            // WebView2 ortami henuz tam oturmamis olabiliyor
+                            // ve ikinci pencere olusturma HRESULT 0x8007139F
+                            // hatasiyla basarisiz oluyor. Kisa aralarla
+                            // birkac kez tekrar deniyoruz.
+                            for attempt in 1..=6 {
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                let app2 = app.clone();
+                                let sent = app.run_on_main_thread(move || {
+                                    let result = WebviewWindowBuilder::new(
+                                        &app2,
+                                        SETTINGS_LABEL,
+                                        WebviewUrl::App("settings.html".into()),
+                                    )
+                                    .title("Mir00r Ayarlar")
+                                    .inner_size(480.0, 700.0)
+                                    .resizable(true)
+                                    .additional_browser_args(WEBVIEW_BROWSER_ARGS)
+                                    .build()
+                                    .map(|_| ())
+                                    .map_err(|e| e.to_string());
+                                    let _ = tx.send(result);
+                                });
+                                if sent.is_err() {
+                                    log::error!("ayarlar penceresi ana thread'e gonderilemedi");
+                                    break;
+                                }
+                                match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                                    Ok(Ok(())) => break,
+                                    Ok(Err(err)) => {
+                                        log::error!(
+                                            "ayarlar penceresi olusturulamadi (deneme {attempt}): {err}"
+                                        );
+                                        std::thread::sleep(std::time::Duration::from_millis(
+                                            400 * attempt,
+                                        ));
+                                    }
+                                    Err(_) => {
+                                        log::error!("ayarlar penceresi olusturma zaman asimina ugradi");
+                                        break;
+                                    }
+                                }
+                            }
+                        });
                     }
                 })
                 .build(app)?;

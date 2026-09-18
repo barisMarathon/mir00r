@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mir00r Ayarlar</title>
+    <style>
+      :root {
+        --accent: #2f5ed4;
+        --accent-light: #4f8cff;
+        --border: #d8dbe2;
+        --text: #1a1a1a;
+        --muted: #6b7280;
+        --bg: #f7f8fa;
+        --card-bg: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+
+      body {
+        padding: 20px 24px 32px;
+      }
+
+      h1 {
+        font-size: 18px;
+        margin: 0 0 16px;
+      }
+
+      section {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+        margin: 0 0 12px;
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      label > span {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      input[type="text"],
+      input[type="number"],
+      textarea {
+        width: 100%;
+        font-size: 13px;
+        padding: 7px 9px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        background: #fff;
+        font-family: inherit;
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 56px;
+      }
+
+      .row {
+        display: flex;
+        gap: 10px;
+      }
+      .row > label {
+        flex: 1;
+      }
+
+      #monitor-preview {
+        position: relative;
+        width: 100%;
+        height: 220px;
+        background: #e9ebf0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+
+      .monitor-rect {
+        position: absolute;
+        background: #fff;
+        border: 1px solid #b9bdc7;
+        border-radius: 3px;
+      }
+
+      #cam-bubble {
+        position: absolute;
+        background: rgba(47, 94, 212, 0.35);
+        border: 2px solid var(--accent);
+        border-radius: 4px;
+        cursor: grab;
+        min-width: 6px;
+        min-height: 6px;
+      }
+
+      #cam-bubble:active {
+        cursor: grabbing;
+      }
+
+      .hint {
+        font-size: 11.5px;
+        color: var(--muted);
+        margin: -4px 0 12px;
+      }
+
+      #save-btn {
+        width: 100%;
+        padding: 10px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #save-btn:hover {
+        background: var(--accent-light);
+      }
+      #save-btn:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      #status-msg {
+        min-height: 18px;
+        font-size: 12.5px;
+        margin-bottom: 8px;
+        text-align: center;
+      }
+      #status-msg.error {
+        color: #c0392b;
+      }
+      #status-msg.ok {
+        color: #1f8a4c;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mir00r Ayarlar</h1>
+
+    <section>
+      <h2>Kamera</h2>
+      <label
+        ><span>Kısayol</span><input id="cam-hotkey" type="text" placeholder="orn. Ctrl+Shift+C"
+      /></label>
+      <div class="row">
+        <label><span>Genişlik</span><input id="cam-width" type="number" min="60" /></label>
+        <label><span>Yükseklik</span><input id="cam-height" type="number" min="60" /></label>
+      </div>
+      <div class="hint">Konumu değiştirmek için aşağıdaki mavi kutuyu sürükle.</div>
+      <div id="monitor-preview"><div id="cam-bubble"></div></div>
+      <div class="row">
+        <label><span>X</span><input id="cam-x" type="number" /></label>
+        <label><span>Y</span><input id="cam-y" type="number" /></label>
+      </div>
+      <label
+        ><span>Sabitleme (pin) tuşu</span
+        ><input id="pin-key" type="text" placeholder="orn. T"
+      /></label>
+      <div class="hint">
+        Kamera basılıyken bu tuşa basmak, o anki zoom/konumda kamerayı sabitler
+        (kamera tuşunu bıraksan da açık kalır). Tekrar basmak sabitlemeyi kaldırır.
+      </div>
+    </section>
+
+    <section>
+      <h2>Sahte Bildirim</h2>
+      <label
+        ><span>Kısayol (toggle)</span
+        ><input id="mock-hotkey" type="text" placeholder="orn. Pause"
+      /></label>
+      <label><span>Başlık</span><input id="mock-title" type="text" /></label>
+      <label><span>Mesaj</span><textarea id="mock-message"></textarea></label>
+    </section>
+
+    <section>
+      <h2>Zoom</h2>
+      <label><span>Tuş</span><input id="zoom-key" type="text" placeholder="orn. /" /></label>
+      <div class="row">
+        <label><span>Büyütme (x)</span><input id="zoom-level" type="number" step="0.1" min="1.1" /></label>
+        <label><span>Pan adımı (%)</span><input id="zoom-pan-step" type="number" step="1" min="1" /></label>
+      </div>
+    </section>
+
+    <div id="status-msg"></div>
+    <button id="save-btn">Kaydet</button>
+
+    <script src="settings.js"></script>
+  </body>
+</html>
