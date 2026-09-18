@@ -169,6 +169,16 @@ pub fn run() {
                 .additional_browser_args(
                     "--use-fake-ui-for-media-stream --disable-gpu-compositing --disable-accelerated-video-decode",
                 )
+                // WebView2 yerel dosyalari diskte onbelleklediginden, gelistirme
+                // sirasinda dist/ altindaki dosyalari degistirmek uygulamayi
+                // yeniden baslatsak bile eski surumu gostermeye devam edebiliyor.
+                // Her yaniti "no-cache" yaparak bunu engelliyoruz.
+                .on_web_resource_request(|_request, response| {
+                    response.headers_mut().insert(
+                        tauri::http::header::CACHE_CONTROL,
+                        tauri::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+                    );
+                })
                 .position(config.region.x as f64, config.region.y as f64)
                 .inner_size(config.region.width as f64, config.region.height as f64)
                 .build()?;
