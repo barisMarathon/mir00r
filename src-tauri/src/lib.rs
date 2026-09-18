@@ -208,6 +208,7 @@ fn camera_hold_handler(
                 let _ = window.show();
 
                 let app_outer = app.clone();
+                let camera_held_outer = camera_held.clone();
                 std::thread::spawn(move || {
                     let app_inner = app_outer.clone();
                     let result = app_outer.run_on_main_thread(move || {
@@ -230,10 +231,39 @@ fn camera_hold_handler(
                             if gs.is_registered(shortcut) {
                                 continue;
                             }
+                            // Ok tusu SADECE bir kez "Pressed" olayi veriyor
+                            // (OS tekrari yok); basili tutuldukca hareketin
+                            // devam etmesi icin kendi tekrar dongumuzu
+                            // baslatiyoruz, "Released" gelene ya da kamera
+                            // birakilana kadar calisiyor.
+                            let key_held = Arc::new(AtomicBool::new(false));
+                            let camera_held_for_pan = camera_held_outer.clone();
                             if let Err(err) = gs.on_shortcut(shortcut, move |app, _s, ev| {
-                                if matches!(ev.state(), ShortcutState::Pressed) {
-                                    if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
-                                        let _ = w.emit(ZOOM_EVENT, action);
+                                match ev.state() {
+                                    ShortcutState::Pressed => {
+                                        if key_held.swap(true, Ordering::SeqCst) {
+                                            return;
+                                        }
+                                        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+                                            let _ = w.emit(ZOOM_EVENT, action);
+                                        }
+                                        let app2 = app.clone();
+                                        let key_held2 = key_held.clone();
+                                        let camera_held2 = camera_held_for_pan.clone();
+                                        std::thread::spawn(move || loop {
+                                            std::thread::sleep(std::time::Duration::from_millis(60));
+                                            if !key_held2.load(Ordering::SeqCst)
+                                                || !camera_held2.load(Ordering::SeqCst)
+                                            {
+                                                break;
+                                            }
+                                            if let Some(w) = app2.get_webview_window(OVERLAY_LABEL) {
+                                                let _ = w.emit(ZOOM_EVENT, action);
+                                            }
+                                        });
+                                    }
+                                    ShortcutState::Released => {
+                                        key_held.store(false, Ordering::SeqCst);
                                     }
                                 }
                             }) {
