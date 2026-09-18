@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -144,27 +146,32 @@ fn get_zoom_config(state: tauri::State<ZoomConfig>) -> ZoomConfig {
     state.inner().clone()
 }
 
-/// Kisayol basiliyken tek overlay penceresini gosterir (once icerik modunu
-/// "camera" ya da "mock" olarak bildirir), birakildiginda gizler. Iki ayri
-/// WebView2 penceresi kullanmak (biri hala kurulurken digeri olusturulmaya
-/// calisildiginda) HRESULT 0x8007139F hatasina yol actigi icin, kamera ve
-/// sahte bildirim ayni pencere/webview icinde, JS tarafinda mod degistirilerek
-/// gosteriliyor.
-fn hold_to_toggle_mode(
-    mode: &'static str,
+/// Sahte bildirim tusu HOLD degil TOGGLE: bir basista acilir ve kalir,
+/// tekrar basilinca kapanir (birakma olayi yok sayilir). Kamera basiliyken
+/// bildirime basilirsa bildirim onune gecer (kamera fiziksel olarak basili
+/// kalsa bile); bildirim kapatilirsa ve kamera hala basiliysa kameraya
+/// geri donulur, degilse pencere tamamen gizlenir.
+fn mock_toggle_handler(
+    camera_held: Arc<AtomicBool>,
+    mock_on: Arc<AtomicBool>,
 ) -> impl Fn(&AppHandle, &Shortcut, ShortcutEvent) + Send + Sync + 'static {
     move |app, _shortcut, event| {
+        if !matches!(event.state(), ShortcutState::Pressed) {
+            return;
+        }
         let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
             return;
         };
-        match event.state() {
-            ShortcutState::Pressed => {
-                let _ = window.emit(MODE_EVENT, mode);
-                let _ = window.show();
-            }
-            ShortcutState::Released => {
-                let _ = window.hide();
-            }
+        let now_on = !mock_on.load(Ordering::SeqCst);
+        mock_on.store(now_on, Ordering::SeqCst);
+        if now_on {
+            let _ = window.emit(MODE_EVENT, "mock");
+            let _ = window.show();
+        } else if camera_held.load(Ordering::SeqCst) {
+            let _ = window.emit(MODE_EVENT, "camera");
+            let _ = window.show();
+        } else {
+            let _ = window.hide();
         }
     }
 }
@@ -187,6 +194,8 @@ fn hold_to_toggle_mode(
 fn camera_hold_handler(
     zoom_shortcut: Shortcut,
     pan_shortcuts: [(&'static str, Shortcut); 4],
+    camera_held: Arc<AtomicBool>,
+    mock_on: Arc<AtomicBool>,
 ) -> impl Fn(&AppHandle, &Shortcut, ShortcutEvent) + Send + Sync + 'static {
     move |app, _shortcut, event| {
         let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
@@ -194,6 +203,7 @@ fn camera_hold_handler(
         };
         match event.state() {
             ShortcutState::Pressed => {
+                camera_held.store(true, Ordering::SeqCst);
                 let _ = window.emit(MODE_EVENT, "camera");
                 let _ = window.show();
 
@@ -237,6 +247,7 @@ fn camera_hold_handler(
                 });
             }
             ShortcutState::Released => {
+                camera_held.store(false, Ordering::SeqCst);
                 let app_outer = app.clone();
                 std::thread::spawn(move || {
                     let app_inner = app_outer.clone();
@@ -252,7 +263,12 @@ fn camera_hold_handler(
                     }
                 });
                 let _ = window.emit(ZOOM_EVENT, "reset");
-                let _ = window.hide();
+                if mock_on.load(Ordering::SeqCst) {
+                    let _ = window.emit(MODE_EVENT, "mock");
+                    let _ = window.show();
+                } else {
+                    let _ = window.hide();
+                }
             }
         }
     }
@@ -322,9 +338,17 @@ pub fn run() {
                 ("pan_left", "Left".parse().expect("gecerli sabit kisayol")),
                 ("pan_right", "Right".parse().expect("gecerli sabit kisayol")),
             ];
+            let camera_held = Arc::new(AtomicBool::new(false));
+            let mock_on = Arc::new(AtomicBool::new(false));
+
             app.global_shortcut().on_shortcut(
                 camera_shortcut,
-                camera_hold_handler(zoom_shortcut, pan_shortcuts),
+                camera_hold_handler(
+                    zoom_shortcut,
+                    pan_shortcuts,
+                    camera_held.clone(),
+                    mock_on.clone(),
+                ),
             )?;
             log::info!("kamera kisayolu kaydedildi: {}", config.hotkey);
             log::info!(
@@ -340,10 +364,12 @@ pub fn run() {
                     config.mock_notification.hotkey
                 )
             })?;
-            app.global_shortcut()
-                .on_shortcut(mock_shortcut, hold_to_toggle_mode("mock"))?;
+            app.global_shortcut().on_shortcut(
+                mock_shortcut,
+                mock_toggle_handler(camera_held, mock_on),
+            )?;
             log::info!(
-                "sahte bildirim kisayolu kaydedildi: {}",
+                "sahte bildirim kisayolu kaydedildi (toggle): {}",
                 config.mock_notification.hotkey
             );
 
