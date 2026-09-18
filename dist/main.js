@@ -115,16 +115,16 @@ window.__TAURI__?.event?.listen("mir00r://zoom-action", (event) => {
       resetZoom();
       break;
     case "pan_up":
-      panBy(0, -panStep);
-      break;
-    case "pan_down":
       panBy(0, panStep);
       break;
+    case "pan_down":
+      panBy(0, -panStep);
+      break;
     case "pan_left":
-      panBy(panStep, 0);
+      panBy(-panStep, 0);
       break;
     case "pan_right":
-      panBy(-panStep, 0);
+      panBy(panStep, 0);
       break;
   }
 });
