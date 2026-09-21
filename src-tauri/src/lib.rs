@@ -289,6 +289,12 @@ fn camera_hold_handler(
         };
         match event.state() {
             ShortcutState::Pressed => {
+                // Kamera tusuna her yeni basis, onceki sabitlemeyi (pin)
+                // otomatik kaldirir. Boylece sabitliyken kamera tusuna kisa
+                // basip birakmak (tek dokunus) kamerayi kapatir; basili
+                // tutmaya devam edilirse normal sekilde acik kalir ve
+                // istenirse tekrar pin tusuyla sabitlenebilir.
+                pinned.store(false, Ordering::SeqCst);
                 camera_held.store(true, Ordering::SeqCst);
                 let _ = window.emit(MODE_EVENT, "camera");
                 let _ = window.show();
