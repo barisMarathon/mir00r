@@ -85,20 +85,37 @@ You need to close and reopen the app after making changes (the Settings
 GUI's automatic restart is currently disabled because it races with
 shortcut registration under the `cargo tauri dev` wrapper).
 
-## Development
+## Building from source
 
-No Node/npm needed; the frontend is plain HTML/CSS/JS (`dist/`), the
+**Prerequisites (Windows):**
+
+- [Rust](https://rustup.rs) (stable toolchain)
+- Tauri CLI: `cargo install tauri-cli --version "^2.0.0" --locked`
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+  (Rust's MSVC linker needs this on Windows)
+- WebView2 Runtime — already installed on most Windows 10/11 machines; if
+  not, grab it from
+  [Microsoft's site](https://developer.microsoft.com/microsoft-edge/webview2/)
+
+No Node/npm needed — the frontend is plain HTML/CSS/JS (`dist/`), the
 backend is Rust (`src-tauri/`).
 
+**Run in dev mode** (hot-reloads on file changes):
+
 ```bash
+git clone https://github.com/barisMarathon/mir00r.git
+cd mir00r/src-tauri
 cargo tauri dev
 ```
 
-Build:
+**Build a release executable and installers:**
 
 ```bash
 cargo tauri build
 ```
+
+This produces a standalone `app.exe` in `src-tauri/target/release/`, plus
+`.msi`/setup installers in `src-tauri/target/release/bundle/`.
 
 ## Known limitations (for next steps)
 
