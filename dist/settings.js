@@ -136,7 +136,7 @@ async function load() {
     renderMonitors();
     renderBubble();
   } catch (err) {
-    showStatus("Ayarlar yuklenemedi: " + err, "error");
+    showStatus("Could not load settings: " + err, "error");
   }
 }
 
@@ -173,11 +173,12 @@ el.saveBtn.addEventListener("click", async () => {
   el.saveBtn.disabled = true;
   try {
     await invoke("save_config", { config });
-    // Otomatik yeniden baslatma (restart_app), eski surec tam kapanmadan
-    // yenisi ayni kisayollari kaydetmeye calisip cakisabiliyor (ozellikle
-    // `cargo tauri dev` sarmalayicisinda). Su an icin kullaniciya manuel
-    // yeniden baslatmasini soyluyoruz; exe'ye gecince tekrar ele alinacak.
-    showStatus("Kaydedildi. Degisikliklerin gecmesi icin Mir00r'u kapatip tekrar ac.", "ok");
+    // Automatic restart (restart_app) can race with the old process not
+    // having fully shut down yet, causing the new one to fail to register
+    // the same shortcuts (especially under the `cargo tauri dev` wrapper).
+    // For now we just tell the user to restart manually; this will be
+    // revisited once there's a packaged exe.
+    showStatus("Saved. Close and reopen Mir00r for the changes to take effect.", "ok");
     el.saveBtn.disabled = false;
   } catch (err) {
     showStatus(String(err), "error");

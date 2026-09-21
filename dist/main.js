@@ -18,7 +18,7 @@ function logToBackend(message) {
   try {
     window.__TAURI__?.core?.invoke("log_frontend", { message });
   } catch (_) {
-    // backend'e ulasilamiyorsa sessizce yut, UI'yi etkilemesin
+    // swallow silently if the backend is unreachable, don't affect the UI
   }
 }
 
@@ -31,9 +31,9 @@ async function ensureMockContent() {
     toastMessage.textContent = config.message;
     mockContentLoaded = true;
   } catch (err) {
-    toastTitle.textContent = "Bildirim";
-    toastMessage.textContent = "Icerik yuklenemedi.";
-    logToBackend("mock bildirim icerik hatasi: " + err);
+    toastTitle.textContent = "Notification";
+    toastMessage.textContent = "Could not load content.";
+    logToBackend("mock notification content error: " + err);
   }
 }
 
@@ -48,10 +48,10 @@ function setMode(mode) {
   }
 }
 
-// Backend hangi kisayolun basildigini "mir00r://mode" olayiyla bildiriyor
-// (payload: "camera" | "mock"); ayni pencere/webview icinde sadece
-// gorunen paneli degistiriyoruz, boylece ikinci bir WebView2 penceresi
-// olusturma ihtiyaci ortadan kalkiyor.
+// The backend announces which hotkey was pressed via the "mir00r://mode"
+// event (payload: "camera" | "mock"); we just switch which panel is
+// visible within the same window/webview, which avoids ever needing a
+// second WebView2 window.
 window.__TAURI__?.event?.listen("mir00r://mode", (event) => {
   setMode(event.payload);
 });
@@ -68,7 +68,7 @@ window.__TAURI__?.core
     zoomTarget = cfg.zoom_level;
     panStep = cfg.pan_step;
   })
-  .catch((err) => logToBackend("zoom config yuklenemedi: " + err));
+  .catch((err) => logToBackend("could not load zoom config: " + err));
 
 function applyVideoTransform() {
   video.style.transform = `scaleX(-1) scale(${zoomLevel}) translate(${panX}%, ${panY}%)`;
@@ -86,8 +86,8 @@ function toggleZoom() {
 }
 
 function panBy(dx, dy) {
-  // Ok tuslarindan biri basilinca, zoom kapaliysa once zoom'u kendisi acar,
-  // sonra o yone dogru pan yapar.
+  // Pressing an arrow key while zoom is off turns zoom on first, then pans
+  // in that direction.
   if (zoomLevel === 1) {
     zoomLevel = zoomTarget;
   }
@@ -106,10 +106,10 @@ function resetZoom() {
 
 applyVideoTransform();
 
-// Kamera acikken Sag Shift ile zoom acilip kapaniyor, ok tuslariyla
-// zoomlu gorunum icinde gezinilebiliyor. Kamera kisayolu birakildiginda
-// backend "reset" gonderiyor, boylece bir sonraki acilista zoom/pan
-// varsayilana donuyor.
+// While the camera is shown, the zoom key toggles zoom on/off and the arrow
+// keys pan within the zoomed view. When the camera hotkey is released, the
+// backend sends "reset" so zoom/pan return to their defaults the next time
+// the camera is shown.
 window.__TAURI__?.event?.listen("mir00r://zoom-action", (event) => {
   switch (event.payload) {
     case "toggle":
@@ -148,14 +148,14 @@ function sampleBrightness() {
     sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
   }
   const avg = sum / (data.length / 4);
-  logToBackend(`brightness ornek: ${avg.toFixed(1)} / 255`);
+  logToBackend(`brightness sample: ${avg.toFixed(1)} / 255`);
 }
 
-// Kamera akisi pencere gizliyken de baslatilir ve surekli acik tutulur;
-// boylece kisayola basildiginda sadece pencere gosterilir, kamera
-// yeniden baslatilmaz ve gecikme olmaz.
+// The camera stream is started even while the window is hidden and kept
+// running continuously; that way the hotkey only needs to show the window,
+// the camera is never restarted, and there's no delay.
 async function startCamera() {
-  logToBackend("kamera erisimi isteniyor...");
+  logToBackend("requesting camera access...");
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: true,
@@ -165,15 +165,15 @@ async function startCamera() {
     try {
       await video.play();
     } catch (playErr) {
-      logToBackend("video.play() hatasi: " + playErr.message);
+      logToBackend("video.play() error: " + playErr.message);
     }
     hideStatus();
     const track = stream.getVideoTracks()[0];
-    logToBackend("kamera basladi: " + (track ? track.label : "bilinmeyen cihaz"));
+    logToBackend("camera started: " + (track ? track.label : "unknown device"));
     setInterval(sampleBrightness, 5000);
   } catch (err) {
-    showStatus("Kamera acilamadi: " + err.message);
-    logToBackend("kamera HATASI: " + err.name + " - " + err.message);
+    showStatus("Could not start camera: " + err.message);
+    logToBackend("camera ERROR: " + err.name + " - " + err.message);
     setTimeout(startCamera, 2000);
   }
 }

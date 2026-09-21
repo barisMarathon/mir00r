@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Mir00r Ayarlar</title>
+    <title>Mir00r Settings</title>
     <style>
       :root {
         --accent: #2f5ed4;
@@ -166,54 +166,56 @@
     </style>
   </head>
   <body>
-    <h1>Mir00r Ayarlar</h1>
+    <h1>Mir00r Settings</h1>
 
     <section>
-      <h2>Kamera</h2>
+      <h2>Camera</h2>
       <label
-        ><span>Kısayol</span><input id="cam-hotkey" type="text" placeholder="orn. Ctrl+Shift+C"
+        ><span>Hotkey</span><input id="cam-hotkey" type="text" placeholder="e.g. Ctrl+Shift+C"
       /></label>
       <div class="row">
-        <label><span>Genişlik</span><input id="cam-width" type="number" min="60" /></label>
-        <label><span>Yükseklik</span><input id="cam-height" type="number" min="60" /></label>
+        <label><span>Width</span><input id="cam-width" type="number" min="60" /></label>
+        <label><span>Height</span><input id="cam-height" type="number" min="60" /></label>
       </div>
-      <div class="hint">Konumu değiştirmek için aşağıdaki mavi kutuyu sürükle.</div>
+      <div class="hint">Drag the blue box below to change the position.</div>
       <div id="monitor-preview"><div id="cam-bubble"></div></div>
       <div class="row">
         <label><span>X</span><input id="cam-x" type="number" /></label>
         <label><span>Y</span><input id="cam-y" type="number" /></label>
       </div>
       <label
-        ><span>Sabitleme (pin) tuşu</span
-        ><input id="pin-key" type="text" placeholder="orn. T"
+        ><span>Pin key</span
+        ><input id="pin-key" type="text" placeholder="e.g. T"
       /></label>
       <div class="hint">
-        Kamera basılıyken bu tuşa basmak, o anki zoom/konumda kamerayı sabitler
-        (kamera tuşunu bıraksan da açık kalır). Tekrar basmak sabitlemeyi kaldırır.
+        Pressing this key while the camera hotkey is held pins the camera at its
+        current zoom/position (it stays open even if you release the camera
+        hotkey). Pressing it again removes the pin.
       </div>
     </section>
 
     <section>
-      <h2>Sahte Bildirim</h2>
+      <h2>Mock Notification</h2>
       <label
-        ><span>Kısayol (toggle)</span
-        ><input id="mock-hotkey" type="text" placeholder="orn. Pause"
+        ><span>Hotkey (toggle)</span
+        ><input id="mock-hotkey" type="text" placeholder="e.g. Pause"
       /></label>
-      <label><span>Başlık</span><input id="mock-title" type="text" /></label>
-      <label><span>Mesaj</span><textarea id="mock-message"></textarea></label>
+      <label><span>Title</span><input id="mock-title" type="text" /></label>
+      <label><span>Message</span><textarea id="mock-message"></textarea></label>
     </section>
 
     <section>
       <h2>Zoom</h2>
-      <label><span>Tuş</span><input id="zoom-key" type="text" placeholder="orn. /" /></label>
+      <label><span>Key</span><input id="zoom-key" type="text" placeholder="e.g. /" /></label>
+      <div class="hint">Leave empty to disable zoom/pan entirely.</div>
       <div class="row">
-        <label><span>Büyütme (x)</span><input id="zoom-level" type="number" step="0.1" min="1.1" /></label>
-        <label><span>Pan adımı (%)</span><input id="zoom-pan-step" type="number" step="1" min="1" /></label>
+        <label><span>Zoom level (x)</span><input id="zoom-level" type="number" step="0.1" min="1.1" /></label>
+        <label><span>Pan step (%)</span><input id="zoom-pan-step" type="number" step="1" min="1" /></label>
       </div>
     </section>
 
     <div id="status-msg"></div>
-    <button id="save-btn">Kaydet</button>
+    <button id="save-btn">Save</button>
 
     <script src="settings.js"></script>
   </body>

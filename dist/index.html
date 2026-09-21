@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Mir00r</title>
@@ -39,7 +39,7 @@
         display: none;
       }
 
-      /* --- kamera modu --- */
+      /* --- camera mode --- */
       #frame {
         border-radius: 12px;
         overflow: hidden;
@@ -51,8 +51,8 @@
         height: 100%;
         object-fit: cover;
         display: block;
-        /* transform JS tarafindan (main.js: applyVideoTransform) yonetiliyor,
-           zoom/pan icin */
+        /* transform is managed from JS (main.js: applyVideoTransform)
+           for zoom/pan */
         transition: transform 0.15s ease-out;
       }
 
@@ -74,7 +74,7 @@
         display: none;
       }
 
-      /* --- sahte bildirim modu --- */
+      /* --- mock notification mode --- */
       #toast {
         box-sizing: border-box;
         display: flex;
@@ -164,7 +164,7 @@
       <div id="toast-header">
         <div id="toast-icon">M</div>
         <div id="toast-app-name">Mir00r</div>
-        <div id="toast-time">simdi</div>
+        <div id="toast-time">now</div>
         <div id="toast-close">&times;</div>
       </div>
       <div id="toast-title"></div>
