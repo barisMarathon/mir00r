@@ -1,3 +1,6 @@
+#[cfg(target_os = "linux")]
+mod linux_shortcuts;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -23,11 +26,13 @@ const DEFAULT_MOCK_HOTKEY: &str = "Pause";
 // version (no VK code mapping for them).
 const DEFAULT_ZOOM_KEY: &str = "";
 const DEFAULT_PIN_KEY: &str = "T";
-// All windows created within the same app / user-data-folder in WebView2
-// must share the same environment options. The overlay window is created
-// with these flags, so every window created afterwards (e.g. settings) must
-// use the SAME flags, otherwise webview creation fails with HRESULT
+// Windows/WebView2 only (see additional_browser_args call sites below): all
+// windows created within the same app / user-data-folder in WebView2 must
+// share the same environment options. The overlay window is created with
+// these flags, so every window created afterwards (e.g. settings) must use
+// the SAME flags, otherwise webview creation fails with HRESULT
 // 0x8007139F.
+#[cfg(target_os = "windows")]
 const WEBVIEW_BROWSER_ARGS: &str =
     "--use-fake-ui-for-media-stream --disable-gpu-compositing --disable-accelerated-video-decode";
 
@@ -227,6 +232,15 @@ fn get_monitors(window: tauri::WebviewWindow) -> Result<Vec<MonitorInfo>, String
             height: m.size().height,
         })
         .collect())
+}
+
+#[cfg(target_os = "linux")]
+fn should_use_wayland_portal() -> bool {
+    linux_shortcuts::is_wayland()
+}
+#[cfg(not(target_os = "linux"))]
+fn should_use_wayland_portal() -> bool {
+    false
 }
 
 #[tauri::command]
@@ -457,27 +471,32 @@ pub fn run() {
             app.manage(config.mock_notification.clone());
             app.manage(config.zoom.clone());
 
-            WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("index.html".into()))
-                .title("Mir00r")
-                .decorations(false)
-                // With the window set to transparent, WebView2's
-                // hardware-accelerated video layer doesn't compose
-                // correctly and the camera image comes out nearly
-                // black/dark. An opaque window fixes it.
-                .transparent(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .resizable(false)
-                .shadow(false)
-                .visible(false)
-                .focused(false)
-                // The camera permission prompt may never be visible/clickable
-                // on such a small, unfocused window; skip the dialog and
-                // auto-approve the default device via Chromium's flag.
-                // Also, frameless + always-on-top windows sometimes render
-                // hardware-accelerated video as black/dark, so we force
-                // software decode too.
-                .additional_browser_args(WEBVIEW_BROWSER_ARGS)
+            #[allow(unused_mut)]
+            let mut overlay_builder =
+                WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("index.html".into()))
+                    .title("Mir00r")
+                    .decorations(false)
+                    // With the window set to transparent, WebView2's
+                    // hardware-accelerated video layer doesn't compose
+                    // correctly and the camera image comes out nearly
+                    // black/dark. An opaque window fixes it.
+                    .transparent(false)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .resizable(false)
+                    .shadow(false)
+                    .visible(false)
+                    .focused(false);
+            // additional_browser_args only exists on Windows (it's a
+            // WebView2/Chromium concept, meaningless for WKWebView/
+            // WebKitGTK). It skips the camera-permission dialog on such a
+            // small/unfocused window and works around a WebView2-specific
+            // black-video compositing bug.
+            #[cfg(target_os = "windows")]
+            {
+                overlay_builder = overlay_builder.additional_browser_args(WEBVIEW_BROWSER_ARGS);
+            }
+            overlay_builder
                 // WebView2 caches local files on disk, so editing files
                 // under dist/ during development can keep showing the old
                 // version even after restarting the app. Marking every
@@ -492,76 +511,94 @@ pub fn run() {
                 .inner_size(config.region.width as f64, config.region.height as f64)
                 .build()?;
 
-            let camera_shortcut: Shortcut = config.hotkey.parse().map_err(|err| {
-                format!("invalid hotkey '{}' in config: {err}", config.hotkey)
-            })?;
-            // Zoom and pin are opt-in: an empty key means the feature is
-            // disabled rather than a parse error.
-            let zoom_shortcut: Option<Shortcut> = if config.zoom.key.is_empty() {
-                None
+            if should_use_wayland_portal() {
+                // Plain key-grabbing (RegisterHotKey/XGrabKey, what
+                // tauri-plugin-global-shortcut uses) does not exist on
+                // Wayland; use the GlobalShortcuts portal instead. See
+                // linux_shortcuts.rs for why this is a separate code path
+                // rather than a shared one.
+                #[cfg(target_os = "linux")]
+                {
+                    linux_shortcuts::spawn(handle.clone(), config.clone());
+                    log::info!(
+                        "Wayland session detected: using the GlobalShortcuts portal for hotkeys \
+                         (requires GNOME 42+ or KDE Plasma 6+; a system dialog will ask you to \
+                         confirm the shortcuts on first run)"
+                    );
+                }
             } else {
-                Some(config.zoom.key.parse().map_err(|err| {
-                    format!("invalid zoom.key '{}' in config: {err}", config.zoom.key)
-                })?)
-            };
-            let pan_shortcuts: [(&'static str, Shortcut); 4] = [
-                ("pan_up", "Up".parse().expect("valid built-in shortcut")),
-                ("pan_down", "Down".parse().expect("valid built-in shortcut")),
-                ("pan_left", "Left".parse().expect("valid built-in shortcut")),
-                ("pan_right", "Right".parse().expect("valid built-in shortcut")),
-            ];
-            let pin_shortcut: Option<Shortcut> = if config.pin_key.is_empty() {
-                None
-            } else {
-                Some(config.pin_key.parse().map_err(|err| {
-                    format!("invalid pin_key '{}' in config: {err}", config.pin_key)
-                })?)
-            };
-            let camera_held = Arc::new(AtomicBool::new(false));
-            let mock_on = Arc::new(AtomicBool::new(false));
-            let pinned = Arc::new(AtomicBool::new(false));
+                let camera_shortcut: Shortcut = config.hotkey.parse().map_err(|err| {
+                    format!("invalid hotkey '{}' in config: {err}", config.hotkey)
+                })?;
+                // Zoom and pin are opt-in: an empty key means the feature is
+                // disabled rather than a parse error.
+                let zoom_shortcut: Option<Shortcut> = if config.zoom.key.is_empty() {
+                    None
+                } else {
+                    Some(config.zoom.key.parse().map_err(|err| {
+                        format!("invalid zoom.key '{}' in config: {err}", config.zoom.key)
+                    })?)
+                };
+                let pan_shortcuts: [(&'static str, Shortcut); 4] = [
+                    ("pan_up", "Up".parse().expect("valid built-in shortcut")),
+                    ("pan_down", "Down".parse().expect("valid built-in shortcut")),
+                    ("pan_left", "Left".parse().expect("valid built-in shortcut")),
+                    ("pan_right", "Right".parse().expect("valid built-in shortcut")),
+                ];
+                let pin_shortcut: Option<Shortcut> = if config.pin_key.is_empty() {
+                    None
+                } else {
+                    Some(config.pin_key.parse().map_err(|err| {
+                        format!("invalid pin_key '{}' in config: {err}", config.pin_key)
+                    })?)
+                };
+                let camera_held = Arc::new(AtomicBool::new(false));
+                let mock_on = Arc::new(AtomicBool::new(false));
+                let pinned = Arc::new(AtomicBool::new(false));
 
-            app.global_shortcut().on_shortcut(
-                camera_shortcut,
-                camera_hold_handler(
-                    zoom_shortcut,
-                    pan_shortcuts,
-                    pin_shortcut,
-                    camera_held.clone(),
-                    mock_on.clone(),
-                    pinned.clone(),
-                ),
-            )?;
-            log::info!("registered camera hotkey: {}", config.hotkey);
-            let zoom_key_desc = if config.zoom.key.is_empty() {
-                "disabled".to_string()
-            } else {
-                format!(
-                    "{} (level: {}x, pan step: {}%)",
-                    config.zoom.key, config.zoom.zoom_level, config.zoom.pan_step
-                )
-            };
-            let pin_key_desc = if config.pin_key.is_empty() {
-                "disabled".to_string()
-            } else {
-                config.pin_key.clone()
-            };
-            log::info!("zoom key: {zoom_key_desc}, pin key: {pin_key_desc}");
+                app.global_shortcut().on_shortcut(
+                    camera_shortcut,
+                    camera_hold_handler(
+                        zoom_shortcut,
+                        pan_shortcuts,
+                        pin_shortcut,
+                        camera_held.clone(),
+                        mock_on.clone(),
+                        pinned.clone(),
+                    ),
+                )?;
+                log::info!("registered camera hotkey: {}", config.hotkey);
+                let zoom_key_desc = if config.zoom.key.is_empty() {
+                    "disabled".to_string()
+                } else {
+                    format!(
+                        "{} (level: {}x, pan step: {}%)",
+                        config.zoom.key, config.zoom.zoom_level, config.zoom.pan_step
+                    )
+                };
+                let pin_key_desc = if config.pin_key.is_empty() {
+                    "disabled".to_string()
+                } else {
+                    config.pin_key.clone()
+                };
+                log::info!("zoom key: {zoom_key_desc}, pin key: {pin_key_desc}");
 
-            let mock_shortcut: Shortcut = config.mock_notification.hotkey.parse().map_err(|err| {
-                format!(
-                    "invalid mock_notification.hotkey '{}' in config: {err}",
+                let mock_shortcut: Shortcut =
+                    config.mock_notification.hotkey.parse().map_err(|err| {
+                        format!(
+                            "invalid mock_notification.hotkey '{}' in config: {err}",
+                            config.mock_notification.hotkey
+                        )
+                    })?;
+                app.global_shortcut().on_shortcut(
+                    mock_shortcut,
+                    mock_toggle_handler(camera_held, pinned, mock_on),
+                )?;
+                log::info!(
+                    "registered mock notification hotkey (toggle): {}",
                     config.mock_notification.hotkey
-                )
-            })?;
-            app.global_shortcut().on_shortcut(
-                mock_shortcut,
-                mock_toggle_handler(camera_held, pinned, mock_on),
-            )?;
-            log::info!(
-                "registered mock notification hotkey (toggle): {}",
-                config.mock_notification.hotkey
-            );
+                );
+            }
 
             let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -599,18 +636,24 @@ pub fn run() {
                                 let (tx, rx) = std::sync::mpsc::channel();
                                 let app2 = app.clone();
                                 let sent = app.run_on_main_thread(move || {
-                                    let result = WebviewWindowBuilder::new(
+                                    #[allow(unused_mut)]
+                                    let mut settings_builder = WebviewWindowBuilder::new(
                                         &app2,
                                         SETTINGS_LABEL,
                                         WebviewUrl::App("settings.html".into()),
                                     )
                                     .title("Mir00r Settings")
                                     .inner_size(480.0, 700.0)
-                                    .resizable(true)
-                                    .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-                                    .build()
-                                    .map(|_| ())
-                                    .map_err(|e| e.to_string());
+                                    .resizable(true);
+                                    #[cfg(target_os = "windows")]
+                                    {
+                                        settings_builder =
+                                            settings_builder.additional_browser_args(WEBVIEW_BROWSER_ARGS);
+                                    }
+                                    let result = settings_builder
+                                        .build()
+                                        .map(|_| ())
+                                        .map_err(|e| e.to_string());
                                     let _ = tx.send(result);
                                 });
                                 if sent.is_err() {

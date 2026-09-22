@@ -24,3 +24,12 @@ log = "0.4"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-global-shortcut = "2"
+
+# Linux only: X11 sessions keep using tauri-plugin-global-shortcut above
+# (confirmed working there), but plain X11 key-grabbing does not exist on
+# Wayland by design. On Wayland we instead talk to the
+# org.freedesktop.portal.GlobalShortcuts D-Bus portal via ashpd.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "global_shortcuts"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "rt"] }
