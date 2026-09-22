@@ -12,6 +12,7 @@ const OVERLAY_LABEL: &str = "overlay";
 const SETTINGS_LABEL: &str = "settings";
 const MODE_EVENT: &str = "mir00r://mode";
 const ZOOM_EVENT: &str = "mir00r://zoom-action";
+const FILTER_EVENT: &str = "mir00r://filter-action";
 const CONFIG_FILE_NAME: &str = "mir00r.config.json";
 // Ctrl+Shift+C collides with the "copy" shortcut in most Linux terminals, so
 // we default to plain, rarely-used keys instead.
@@ -23,6 +24,7 @@ const DEFAULT_MOCK_HOTKEY: &str = "Pause";
 // version (no VK code mapping for them).
 const DEFAULT_ZOOM_KEY: &str = "";
 const DEFAULT_PIN_KEY: &str = "T";
+const DEFAULT_FILTER_KEY: &str = "Y";
 // All windows created within the same app / user-data-folder in WebView2
 // must share the same environment options. The overlay window is created
 // with these flags, so every window created afterwards (e.g. settings) must
@@ -92,6 +94,10 @@ fn default_pin_key() -> String {
     DEFAULT_PIN_KEY.to_string()
 }
 
+fn default_filter_key() -> String {
+    DEFAULT_FILTER_KEY.to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Config {
     /// Accelerator string, e.g. "Ctrl+Shift+C". Modifiers must come before the key.
@@ -106,6 +112,11 @@ struct Config {
     /// hotkey is released. Pressing it again removes the pin. No modifiers.
     #[serde(default = "default_pin_key")]
     pin_key: String,
+    /// Pressing this key while the camera hotkey is held cycles through the
+    /// color filters (normal -> invert -> hue-rotate -> normal). No
+    /// modifiers; leave empty to disable.
+    #[serde(default = "default_filter_key")]
+    filter_key: String,
 }
 
 impl Default for Config {
@@ -116,6 +127,7 @@ impl Default for Config {
             mock_notification: MockNotificationConfig::default(),
             zoom: ZoomConfig::default(),
             pin_key: default_pin_key(),
+            filter_key: default_filter_key(),
         }
     }
 }
@@ -199,6 +211,12 @@ fn save_config(app: AppHandle, config: Config) -> Result<(), String> {
             .pin_key
             .parse::<Shortcut>()
             .map_err(|e| format!("Invalid pin key: {e}"))?;
+    }
+    if !config.filter_key.is_empty() {
+        config
+            .filter_key
+            .parse::<Shortcut>()
+            .map_err(|e| format!("Invalid filter key: {e}"))?;
     }
 
     let path = config_path(&app).map_err(|e| e.to_string())?;
@@ -290,6 +308,7 @@ fn camera_hold_handler(
     zoom_shortcut: Option<Shortcut>,
     pan_shortcuts: [(&'static str, Shortcut); 4],
     pin_shortcut: Option<Shortcut>,
+    filter_shortcut: Option<Shortcut>,
     camera_held: Arc<AtomicBool>,
     mock_on: Arc<AtomicBool>,
     pinned: Arc<AtomicBool>,
@@ -347,6 +366,22 @@ fn camera_hold_handler(
                                     }
                                 }) {
                                     log::error!("could not register pin shortcut: {err}");
+                                }
+                            }
+                        }
+                        // The filter key is also only active while the
+                        // camera is held: pressing it cycles the color
+                        // filter (normal -> invert -> hue-rotate -> ...).
+                        if let Some(filter_shortcut) = filter_shortcut {
+                            if !gs.is_registered(filter_shortcut) {
+                                if let Err(err) = gs.on_shortcut(filter_shortcut, |app, _s, ev| {
+                                    if matches!(ev.state(), ShortcutState::Pressed) {
+                                        if let Some(w) = app.get_webview_window(OVERLAY_LABEL) {
+                                            let _ = w.emit(FILTER_EVENT, "cycle");
+                                        }
+                                    }
+                                }) {
+                                    log::error!("could not register filter shortcut: {err}");
                                 }
                             }
                         }
@@ -412,6 +447,9 @@ fn camera_hold_handler(
                         if let Some(pin_shortcut) = pin_shortcut {
                             let _ = gs.unregister(pin_shortcut);
                         }
+                        if let Some(filter_shortcut) = filter_shortcut {
+                            let _ = gs.unregister(filter_shortcut);
+                        }
                         for (_, shortcut) in pan_shortcuts {
                             let _ = gs.unregister(shortcut);
                         }
@@ -421,11 +459,12 @@ fn camera_hold_handler(
                     }
                 });
                 // If pinned, leave the window exactly as it is (current
-                // zoom/position); no hiding or resetting.
+                // zoom/position/filter); no hiding or resetting.
                 if pinned.load(Ordering::SeqCst) {
                     return;
                 }
                 let _ = window.emit(ZOOM_EVENT, "reset");
+                let _ = window.emit(FILTER_EVENT, "reset");
                 if mock_on.load(Ordering::SeqCst) {
                     let _ = window.emit(MODE_EVENT, "mock");
                     let _ = window.show();
@@ -517,6 +556,13 @@ pub fn run() {
                     format!("invalid pin_key '{}' in config: {err}", config.pin_key)
                 })?)
             };
+            let filter_shortcut: Option<Shortcut> = if config.filter_key.is_empty() {
+                None
+            } else {
+                Some(config.filter_key.parse().map_err(|err| {
+                    format!("invalid filter_key '{}' in config: {err}", config.filter_key)
+                })?)
+            };
             let camera_held = Arc::new(AtomicBool::new(false));
             let mock_on = Arc::new(AtomicBool::new(false));
             let pinned = Arc::new(AtomicBool::new(false));
@@ -527,6 +573,7 @@ pub fn run() {
                     zoom_shortcut,
                     pan_shortcuts,
                     pin_shortcut,
+                    filter_shortcut,
                     camera_held.clone(),
                     mock_on.clone(),
                     pinned.clone(),
@@ -546,7 +593,14 @@ pub fn run() {
             } else {
                 config.pin_key.clone()
             };
-            log::info!("zoom key: {zoom_key_desc}, pin key: {pin_key_desc}");
+            let filter_key_desc = if config.filter_key.is_empty() {
+                "disabled".to_string()
+            } else {
+                config.filter_key.clone()
+            };
+            log::info!(
+                "zoom key: {zoom_key_desc}, pin key: {pin_key_desc}, filter key: {filter_key_desc}"
+            );
 
             let mock_shortcut: Shortcut = config.mock_notification.hotkey.parse().map_err(|err| {
                 format!(

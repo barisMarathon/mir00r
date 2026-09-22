@@ -106,6 +106,40 @@ function resetZoom() {
 
 applyVideoTransform();
 
+// Color filters: not photo-style warm/cool presets, just plain color-math
+// transforms. Cycled with the filter key while the camera is shown.
+const COLOR_FILTERS = ["none", "invert(1)", "hue-rotate(180deg)"];
+let filterIndex = 0;
+
+function applyVideoFilter() {
+  video.style.filter = COLOR_FILTERS[filterIndex];
+}
+
+function cycleFilter() {
+  filterIndex = (filterIndex + 1) % COLOR_FILTERS.length;
+  applyVideoFilter();
+}
+
+function resetFilter() {
+  filterIndex = 0;
+  applyVideoFilter();
+}
+
+applyVideoFilter();
+
+// Same hold-scoped-key pattern as zoom/pan/pin: only active while the
+// camera hotkey is held, reset when it's released.
+window.__TAURI__?.event?.listen("mir00r://filter-action", (event) => {
+  switch (event.payload) {
+    case "cycle":
+      cycleFilter();
+      break;
+    case "reset":
+      resetFilter();
+      break;
+  }
+});
+
 // While the camera is shown, the zoom key toggles zoom on/off and the arrow
 // keys pan within the zoomed view. When the camera hotkey is released, the
 // backend sends "reset" so zoom/pan return to their defaults the next time

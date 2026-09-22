@@ -7,6 +7,7 @@ const el = {
   camX: document.getElementById("cam-x"),
   camY: document.getElementById("cam-y"),
   pinKey: document.getElementById("pin-key"),
+  filterKey: document.getElementById("filter-key"),
   mockHotkey: document.getElementById("mock-hotkey"),
   mockTitle: document.getElementById("mock-title"),
   mockMessage: document.getElementById("mock-message"),
@@ -124,6 +125,7 @@ async function load() {
     el.camX.value = config.region.x;
     el.camY.value = config.region.y;
     el.pinKey.value = config.pin_key;
+    el.filterKey.value = config.filter_key;
 
     el.mockHotkey.value = config.mock_notification.hotkey;
     el.mockTitle.value = config.mock_notification.title;
@@ -158,6 +160,7 @@ el.saveBtn.addEventListener("click", async () => {
       height: Number(el.camHeight.value),
     },
     pin_key: el.pinKey.value.trim(),
+    filter_key: el.filterKey.value.trim(),
     mock_notification: {
       hotkey: el.mockHotkey.value.trim(),
       title: el.mockTitle.value,

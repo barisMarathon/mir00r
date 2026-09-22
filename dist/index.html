@@ -51,9 +51,11 @@
         height: 100%;
         object-fit: cover;
         display: block;
-        /* transform is managed from JS (main.js: applyVideoTransform)
-           for zoom/pan */
-        transition: transform 0.15s ease-out;
+        /* transform/filter are managed from JS (main.js:
+           applyVideoTransform/applyVideoFilter) for zoom/pan/color filters */
+        transition:
+          transform 0.15s ease-out,
+          filter 0.15s ease-out;
       }
 
       #status {
